@@ -19,13 +19,30 @@ import {
 } from "./controllers/esewa.controller.js";
 const app = express();
 dotenv.config();
+// app.use(
+//   cors({
+//     origin: process.env.CLIENT_URL, // Replace with your frontend's URL
+//     methods: ["GET", "POST", "PUT", "DELETE"],
+//     allowedHeaders: ["Content-Type", "Authorization"],
+//   })
+// );
+const allowedOrigins = process.env.CLIENT_URL.split(",");
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL, // Replace with your frontend's URL
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ""))) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
 app.use(express.json());
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true })); // To parse URL-encoded bodies
