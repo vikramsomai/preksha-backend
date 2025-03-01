@@ -67,7 +67,11 @@ app.get("/api/user/profile", authenticateToken, async (req, res) => {
 });
 connectDB();
 app.use("/api/otp", otpRoute); // Use OTP route
-
+app.get("/", (req, res) => {
+  res.json({
+    hello: "hello",
+  });
+});
 // Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
