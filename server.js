@@ -28,14 +28,24 @@ dotenv.config();
 // );
 const allowedOrigins = process.env.CLIENT_URL.split(",");
 
+// app.use(
+//   cors({
+//     origin: function (origin, callback) {
+//       if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ""))) {
+//         callback(null, true);
+//       } else {
+//         callback(new Error("Not allowed by CORS"));
+//       }
+//     },
+//     credentials: true,
+//     methods: ["GET", "POST", "PUT", "DELETE"],
+//     allowedHeaders: ["Content-Type", "Authorization"],
+//   })
+// );
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ""))) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+    origin: (origin, callback) => {
+      callback(null, true); // Allows all origins dynamically
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE"],
