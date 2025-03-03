@@ -11,6 +11,7 @@ import dotenv from "dotenv";
 import otpRoute from "./routes/otpRoute.js";
 import adminRoute from "./routes/adminRoute.js";
 import orderRoutes from "./routes/orderRoute.js";
+import categoryRoute from "./routes/categoryRoutes.js"
 import User from "./models/User.js";
 import {
   paymentStatus,
@@ -69,6 +70,7 @@ app.use("/admin", adminRoute);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/order", orderRoutes);
+app.use("/category",categoryRoute)
 //routes
 app.post("/initiate-payment", EsewaInitiatePayment);
 app.post("/payment-status", paymentStatus);
