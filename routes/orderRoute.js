@@ -69,10 +69,8 @@ router.put("/:orderId/status", async (req, res) => {
   }
 });
 router.get("/print/:id", async (req, res) => {
-  console.log(req.params);
   try {
     const orderId = req.params.id;
-    console.log(req);
     const order = await Order.find({ orderId: orderId });
 
     if (!order) {
@@ -87,5 +85,5 @@ router.get("/print/:id", async (req, res) => {
   }
 });
 
-router.get("/top-selling", getTopSellingProductByQuantity);
+router.get("/top/top-selling", getTopSellingProductByQuantity);
 export default router;

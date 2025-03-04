@@ -14,6 +14,7 @@ const productSchema = new mongoose.Schema(
     category: { type: String, required: true },
     subcategory: { type: String },
     price: { type: Number, required: true },
+    discount: { type: Number },
     qty: { type: Number, default: 1 },
     sizes: { type: [String], default: [] },
     bestseller: { type: Boolean, default: false },

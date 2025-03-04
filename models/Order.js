@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-
+const ObjectId = mongoose.Types.ObjectId;
 const orderSchema = new mongoose.Schema(
   {
     orderId: { type: String, required: true },
@@ -67,20 +67,28 @@ const orderSchema = new mongoose.Schema(
 
 orderSchema.statics.getTopSellingProductByQuantity = async function () {
   const result = await this.aggregate([
-    // Unwind the products array to process each product individually
-    { $unwind: "$products" },
-    // Group by productId and sum the quantities
-    {
-      $group: {
-        _id: "$products.productId",
-        totalQuantity: { $sum: "$products.quantity" },
-        productName: { $first: "$products.name" },
+      {
+        $unwind: "$products",
       },
-    },
-    // Sort descending by totalQuantity
-    { $sort: { totalQuantity: -1 } },
-    // Limit to the top result
-    { $limit: 1 },
+      {
+        $group: {
+          _id: "$products.productId",
+          totalSold: {
+            $sum: "$products.quantity",
+          },
+          productName: {
+            $first: "$products.name",
+          },
+        },
+      },
+      {
+        $sort: {
+          totalSold: -1,
+        },
+      },
+      {
+        $limit: 1,
+      },
   ]);
 
   return result.length ? result[0] : null;

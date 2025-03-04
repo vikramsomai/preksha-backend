@@ -23,7 +23,6 @@ function generateOTP() {
 // Route: Send OTP
 router.post("/send", async (req, res) => {
   const { email } = req.body;
-  console.log("Received request to send OTP to:", email); // Debug log
 
   if (!email) {
     console.error("Email is required");
@@ -32,7 +31,6 @@ router.post("/send", async (req, res) => {
 
   const otp = generateOTP();
   otpStore[email] = { otp, expiresAt: Date.now() + 5 * 60 * 1000 };
-  console.log("Generated OTP:", otp); // Debug log
 
   const mailOptions = {
     from: process.env.EMAIL_USER,
@@ -59,7 +57,6 @@ router.post("/send", async (req, res) => {
 
   try {
     await transporter.sendMail(mailOptions);
-    console.log("OTP sent successfully to:", email); // Debug log
     res.status(200).json({ message: `OTP sent successfully to ${email}` });
   } catch (error) {
     console.error("Error sending OTP:", error);
@@ -70,7 +67,6 @@ router.post("/send", async (req, res) => {
 // Route: Verify OTP
 router.post("/verify", (req, res) => {
   const { email, otp } = req.body;
-  console.log("Received request to verify OTP for:", email); // Debug log
 
   if (!email || !otp) {
     console.error("Email and OTP are required");
@@ -78,14 +74,12 @@ router.post("/verify", (req, res) => {
   }
 
   const storedOtpData = otpStore[email];
-  console.log("Stored OTP data:", storedOtpData); // Debug log
 
   if (
     storedOtpData &&
     storedOtpData.otp === otp &&
     Date.now() < storedOtpData.expiresAt
   ) {
-    console.log("OTP verified successfully for:", email); // Debug log
     delete otpStore[email];
     res.status(200).json({ message: "OTP verified successfully" });
   } else {
