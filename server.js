@@ -11,48 +11,70 @@ import dotenv from "dotenv";
 import otpRoute from "./routes/otpRoute.js";
 import adminRoute from "./routes/adminRoute.js";
 import orderRoutes from "./routes/orderRoute.js";
-import categoryRoute from "./routes/categoryRoutes.js"
+import categoryRoute from "./routes/categoryRoutes.js";
 import User from "./models/User.js";
 import {
   paymentStatus,
   EsewaInitiatePayment,
-  codPayment,
+  codPayment
 } from "./controllers/esewa.controller.js";
-const app = express();
-dotenv.config();
-// app.use(
-//   cors({
-//     origin: process.env.CLIENT_URL, // Replace with your frontend's URL
-//     methods: ["GET", "POST", "PUT", "DELETE"],
-//     allowedHeaders: ["Content-Type", "Authorization"],
-//   })
-// );
-const allowedOrigins = process.env.CLIENT_URL.split(",");
 
-// app.use(
-//   cors({
-//     origin: function (origin, callback) {
-//       if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ""))) {
-//         callback(null, true);
-//       } else {
-//         callback(new Error("Not allowed by CORS"));
-//       }
-//     },
-//     credentials: true,
-//     methods: ["GET", "POST", "PUT", "DELETE"],
-//     allowedHeaders: ["Content-Type", "Authorization"],
-//   })
-// );
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      callback(null, true); // Allows all origins dynamically
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+dotenv.config();
+const app = express();
+
+// Security: Rate limiting for production
+const rateLimit = {};
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_REQUESTS = 100;
+
+const rateLimiter = (req, res, next) => {
+  if (process.env.NODE_ENV !== 'production') return next();
+  
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  
+  if (!rateLimit[ip]) {
+    rateLimit[ip] = { count: 1, startTime: now };
+  } else if (now - rateLimit[ip].startTime > RATE_LIMIT_WINDOW) {
+    rateLimit[ip] = { count: 1, startTime: now };
+  } else {
+    rateLimit[ip].count++;
+    if (rateLimit[ip].count > MAX_REQUESTS) {
+      return res.status(429).json({ message: 'Too many requests. Please try again later.' });
+    }
+  }
+  next();
+};
+
+// CORS configuration
+const allowedOrigins = process.env.CLIENT_URL 
+  ? process.env.CLIENT_URL.split(",").map(origin => origin.trim())
+  : ['http://localhost:4200'];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is allowed
+    const normalizedOrigin = origin.replace(/\/$/, '');
+    if (allowedOrigins.some(allowed => normalizedOrigin === allowed.replace(/\/$/, ''))) {
+      callback(null, true);
+    } else if (process.env.NODE_ENV !== 'production') {
+      // In development, allow all origins
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.use(rateLimiter);
 
 app.use(express.json());
 app.use(bodyParser.json());
@@ -70,11 +92,12 @@ app.use("/admin", adminRoute);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/order", orderRoutes);
-app.use("/category",categoryRoute)
+app.use("/category", categoryRoute);
 //routes
 app.post("/initiate-payment", EsewaInitiatePayment);
 app.post("/payment-status", paymentStatus);
 app.post("/codPayment", codPayment);
+
 app.get("/api/user/profile", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);

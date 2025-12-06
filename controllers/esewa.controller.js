@@ -1,153 +1,273 @@
 import Order from "../models/Order.js";
 import Product from "../models/Product.js";
 
-import { EsewaPaymentGateway, EsewaCheckStatus } from "esewajs"; //we install our package hehe
+import { EsewaPaymentGateway, EsewaCheckStatus } from "esewajs";
+
+// Helper function to update product stock
+const updateProductStock = async (products, restore = false) => {
+  const results = [];
+  
+  for (const item of products) {
+    try {
+      const product = await Product.findOne({ productId: item.productId });
+      if (!product) {
+        console.warn(`Product ${item.productId} not found.`);
+        results.push({ productId: item.productId, success: false, error: 'Product not found' });
+        continue;
+      }
+
+      if (restore) {
+        product.qty += item.quantity;
+        await product.save();
+        results.push({ productId: item.productId, success: true, action: 'restored' });
+      } else {
+        if (product.qty >= item.quantity) {
+          product.qty -= item.quantity;
+          await product.save();
+          results.push({ productId: item.productId, success: true, action: 'deducted' });
+        } else {
+          console.warn(`Insufficient stock for product ${item.productId}. Available: ${product.qty}, Requested: ${item.quantity}`);
+          results.push({ productId: item.productId, success: false, error: 'Insufficient stock' });
+        }
+      }
+    } catch (error) {
+      console.error(`Error updating stock for ${item.productId}:`, error.message);
+      results.push({ productId: item.productId, success: false, error: error.message });
+    }
+  }
+  
+  return results;
+};
+
+// Validate order data before processing
+const validateOrderData = (order) => {
+  const errors = [];
+  
+  if (!order.users?.userId) errors.push('User ID is required');
+  if (!order.users?.firstName) errors.push('First name is required');
+  if (!order.users?.email) errors.push('Email is required');
+  if (!order.users?.phoneNumber) errors.push('Phone number is required');
+  if (!order.products || order.products.length === 0) errors.push('Products are required');
+  if (!order.shippingAddress?.address) errors.push('Shipping address is required');
+  if (!order.shippingAddress?.province) errors.push('Province is required');
+  if (!order.totalAmount || order.totalAmount <= 0) errors.push('Valid total amount is required');
+  
+  return errors;
+};
 
 const EsewaInitiatePayment = async (req, res) => {
-  const { amount, productId, order } = req.body; // Data from frontend
-  console.log("Initiating payment with:", { amount, productId, order });
+  const { amount, productId, order } = req.body;
+
+  // Validate input
+  if (!amount || amount <= 0) {
+    return res.status(400).json({ message: "Invalid amount." });
+  }
+
+  if (!productId) {
+    return res.status(400).json({ message: "Product ID (transaction ID) is required." });
+  }
+
+  const validationErrors = validateOrderData(order);
+  if (validationErrors.length > 0) {
+    return res.status(400).json({ message: "Validation failed", errors: validationErrors });
+  }
 
   try {
+    // Check if order with same ID already exists
+    const existingOrder = await Order.findOne({ orderId: productId });
+    if (existingOrder) {
+      return res.status(400).json({ message: "Order with this transaction ID already exists." });
+    }
+
+    // Verify stock availability before proceeding
+    for (const item of order.products) {
+      const product = await Product.findOne({ productId: item.productId });
+      if (!product) {
+        return res.status(400).json({ message: `Product ${item.productId} not found.` });
+      }
+      if (product.qty < item.quantity) {
+        return res.status(400).json({ 
+          message: `Insufficient stock for ${item.name}. Available: ${product.qty}, Requested: ${item.quantity}` 
+        });
+      }
+    }
+
     const reqPayment = await EsewaPaymentGateway(
       amount,
-      0,
-      0,
-      0,
+      0, // tax
+      0, // product service charge
+      0, // product delivery charge
       productId,
       process.env.MERCHANT_ID,
       process.env.SECRET,
       process.env.SUCCESS_URL,
       process.env.FAILURE_URL,
-      process.env.ESEWAPAYMENT_URL,
-      undefined,
-      undefined
+      process.env.ESEWAPAYMENT_URL
     );
 
-    if (!reqPayment) {
-      return res.status(400).json({ message: "Error sending data to eSewa." });
+    if (!reqPayment || reqPayment.status !== 200) {
+      return res.status(400).json({ message: "Error initiating eSewa payment." });
     }
 
-    if (reqPayment.status === 200) {
-      // Save transaction details in the database
-      const orders = new Order({
-        orderId: productId,
-        user: {
-          userId: order.users.userId, // Make sure to provide this value
-          firstName: order.users.firstName, // Make sure to provide this value
-          lastName: order.users.lastName, // Make sure to provide this value
-          email: order.users.email, // Make sure to provide this value
-          phoneNumber: order.users.phoneNumber,
-        },
-        products: order.products,
-        totalAmount: order.totalAmount,
-        payment: {
-          method: order.payment.method,
-          transactionId: order.payment.transactionId,
-          status: order.payment.status,
-        },
-        shippingAddress: order.shippingAddress,
-        status: order.status,
-      });
+    // Create order with PENDING status
+    const newOrder = new Order({
+      orderId: productId,
+      user: {
+        userId: order.users.userId,
+        firstName: order.users.firstName,
+        lastName: order.users.lastName || '',
+        email: order.users.email,
+        phoneNumber: order.users.phoneNumber,
+      },
+      products: order.products,
+      totalAmount: order.totalAmount,
+      payment: {
+        method: 'ESEWA',
+        transactionId: productId,
+        status: 'PENDING',
+      },
+      shippingAddress: order.shippingAddress,
+      status: 'Order Placed',
+    });
 
-      await orders.save();
-      await Promise.all(
-        order.products.map(async (item) => {
-          // Lookup the product using your custom 'productId' field
-          const product = await Product.findOne({ productId: item.productId });
-          if (product) {
-            // Check if there is sufficient quantity before deducting
-            if (product.qty >= item.quantity) {
-              product.qty -= item.quantity;
-              await product.save();
-            } else {
-              // Optionally handle insufficient inventory here (rollback or notify)
-              console.warn(
-                `Insufficient inventory for product ${item.productId}. Available: ${product.qty}, Requested: ${item.quantity}`
-              );
-            }
-          } else {
-            console.warn(`Product ${item.productId} not found.`);
-          }
-        })
-      );
+    await newOrder.save();
+    
+    // Deduct stock
+    await updateProductStock(order.products, false);
 
-      return res.status(200).json({
-        message: "Payment initiated successfully.",
-        product_id: productId,
-        url: reqPayment.request.res.responseUrl, // Redirect URL
-      });
-    }
+    res.status(200).json({
+      message: "Payment initiated successfully.",
+      product_id: productId,
+      url: reqPayment.request.res.responseUrl,
+    });
+
+    // Set timeout to clean up pending orders (2 minutes)
+    setTimeout(async () => {
+      try {
+        const pendingOrder = await Order.findOne({
+          orderId: productId,
+          "payment.status": "PENDING",
+        });
+
+        if (pendingOrder) {
+          console.log(`Order ${productId} still pending after 2 minutes. Cleaning up...`);
+          await updateProductStock(order.products, true);
+          await Order.deleteOne({ orderId: productId });
+          console.log(`Order ${productId} removed and stock restored.`);
+        }
+      } catch (error) {
+        console.error("Error in cleanup timeout:", error.message);
+      }
+    }, 120000); // 2 minutes
+
   } catch (error) {
-    console.error("Error initiating payment:", error.message);
+    console.error("Payment initiation error:", error);
     return res.status(500).json({
       message: "Failed to initiate payment.",
       error: error.message,
     });
   }
 };
+
 const codPayment = async (req, res) => {
-  const { productId,order } = req.body; // Data from frontend
-  const orders = new Order({
-    orderId: productId,
-    user: {
-      userId: order.users.userId, // Make sure to provide this value
-      firstName: order.users.firstName, // Make sure to provide this value
-      lastName: order.users.lastName, // Make sure to provide this value
-      email: order.users.email, // Make sure to provide this value
-      phoneNumber: order.users.phoneNumber,
-    },
-    products: order.products,
-    totalAmount: order.totalAmount,
-    payment: {
-      method: order.payment.method,
-      transactionId: order.payment.transactionId,
-      status: order.payment.status,
-    },
-    shippingAddress: order.shippingAddress,
-    status: order.status,
-  });
+  const { productId, order } = req.body;
+
+  // Validate input
+  if (!productId) {
+    return res.status(400).json({ message: "Transaction ID is required." });
+  }
+
+  const validationErrors = validateOrderData(order);
+  if (validationErrors.length > 0) {
+    return res.status(400).json({ message: "Validation failed", errors: validationErrors });
+  }
+
   try {
-    await orders.save();
-    await Promise.all(
-      order.products.map(async (item) => {
-        // Lookup the product using your custom 'productId' field
-        const product = await Product.findOne({ productId: item.productId });
-        if (product) {
-          // Check if there is sufficient quantity before deducting
-          if (product.qty >= item.quantity) {
-            product.qty -= item.quantity;
-            await product.save();
-          } else {
-            // Optionally handle insufficient inventory here (rollback or notify)
-            console.warn(
-              `Insufficient inventory for product ${item.productId}. Available: ${product.qty}, Requested: ${item.quantity}`
-            );
-          }
-        } else {
-          console.warn(`Product ${item.productId} not found.`);
-        }
-      })
-    );
-    return res.status(200).json({ message: "successfully saved" });
+    // Check if order with same ID already exists
+    const existingOrder = await Order.findOne({ orderId: productId });
+    if (existingOrder) {
+      return res.status(400).json({ message: "Order with this transaction ID already exists." });
+    }
+
+    // Verify stock availability
+    for (const item of order.products) {
+      const product = await Product.findOne({ productId: item.productId });
+      if (!product) {
+        return res.status(400).json({ message: `Product ${item.productId} not found.` });
+      }
+      if (product.qty < item.quantity) {
+        return res.status(400).json({ 
+          message: `Insufficient stock for ${item.name}. Available: ${product.qty}, Requested: ${item.quantity}` 
+        });
+      }
+    }
+
+    // Create order
+    const newOrder = new Order({
+      orderId: productId,
+      user: {
+        userId: order.users.userId,
+        firstName: order.users.firstName,
+        lastName: order.users.lastName || '',
+        email: order.users.email,
+        phoneNumber: order.users.phoneNumber,
+      },
+      products: order.products,
+      totalAmount: order.totalAmount,
+      payment: {
+        method: 'COD',
+        transactionId: productId,
+        status: 'PENDING',
+      },
+      shippingAddress: order.shippingAddress,
+      status: 'Order Placed',
+    });
+
+    await newOrder.save();
+
+    // Deduct stock
+    const stockResults = await updateProductStock(order.products, false);
+    const failedItems = stockResults.filter(r => !r.success);
+    
+    if (failedItems.length > 0) {
+      console.warn('Some stock updates failed:', failedItems);
+    }
+
+    return res.status(200).json({ 
+      message: "Order placed successfully",
+      orderId: productId
+    });
+
   } catch (err) {
-    return res.status(500).json({ err: "failed" });
+    console.error("COD order error:", err);
+    return res.status(500).json({ message: "Failed to place order", error: err.message });
   }
 };
 
 const paymentStatus = async (req, res) => {
-  console.log("product id set", req.body);
-  const orderId = req.body.product_id; // Data from frontend
+  const orderId = req.body.product_id;
+
+  if (!orderId) {
+    return res.status(400).json({ message: "Order ID is required." });
+  }
 
   try {
-    // Find the transaction in the database
     const order = await Order.findOne({ orderId });
 
     if (!order) {
-      console.error("Transaction not found for product ID:", orderId);
-      return res.status(404).json({ message: "Transaction not found." });
+      console.error("Order not found for ID:", orderId);
+      return res.status(404).json({ message: "Order not found." });
     }
 
-    // Call eSewa to check the payment status
+    // If already completed, return success
+    if (order.payment.status === 'COMPLETE') {
+      return res.status(200).json({
+        message: "Payment already verified.",
+        status: order.payment.status,
+      });
+    }
+
+    // Call eSewa to check payment status
     const paymentStatusCheck = await EsewaCheckStatus(
       order.totalAmount,
       order.orderId,
@@ -155,32 +275,41 @@ const paymentStatus = async (req, res) => {
       process.env.ESEWAPAYMENT_STATUS_CHECK_URL
     );
 
-    console.log("Payment status response:", paymentStatusCheck.data);
+    console.log("eSewa status response:", paymentStatusCheck?.data);
 
-    if (paymentStatusCheck.status === 200) {
-      // Update transaction status based on response
-      order.payment.status =
-        paymentStatusCheck.data.status === "COMPLETE" ? "COMPLETE" : "FAILED";
-
-      await order.save();
-      console.log("Transaction updated:", transaction);
-
-      return res.status(200).json({
-        message: "Transaction status updated successfully.",
-        status: order.payment.status,
-      });
-    } else {
-      console.error("Payment status check failed.");
+    if (paymentStatusCheck && paymentStatusCheck.status === 200) {
+      const esewaStatus = paymentStatusCheck.data?.status;
       
+      if (esewaStatus === "COMPLETE") {
+        order.payment.status = "COMPLETE";
+        await order.save();
+
+        return res.status(200).json({
+          message: "Payment verified successfully.",
+          status: "COMPLETE",
+        });
+      } else {
+        order.payment.status = "FAILED";
+        await order.save();
+
+        // Restore stock on failed payment
+        await updateProductStock(order.products, true);
+
+        return res.status(200).json({
+          message: "Payment verification failed.",
+          status: "FAILED",
+        });
+      }
+    } else {
       return res.status(400).json({
-        message: "Failed to verify payment status.",
-        error: paymentStatusCheck.data,
+        message: "Failed to verify payment status with eSewa.",
+        error: paymentStatusCheck?.data,
       });
     }
   } catch (error) {
-    console.error("Error verifying payment status:", error.message);
+    console.error("Error verifying payment:", error.message);
     return res.status(500).json({
-      message: "Server error while verifying payment status.",
+      message: "Server error while verifying payment.",
       error: error.message,
     });
   }
