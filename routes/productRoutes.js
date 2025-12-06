@@ -5,7 +5,12 @@ const router = express.Router();
 
 router.get("/:id", async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id); // Correct way
+    // First try to find by productId (UUID), then by MongoDB _id
+    let product = await Product.findOne({ productId: req.params.id });
+    if (!product) {
+      // Fallback to finding by MongoDB _id
+      product = await Product.findById(req.params.id);
+    }
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
@@ -20,7 +25,12 @@ router.delete("/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    const product = await Product.findByIdAndDelete(req.params.id); // Find product by ID
+    // First try to find and delete by productId (UUID), then by MongoDB _id
+    let product = await Product.findOneAndDelete({ productId: req.params.id });
+    if (!product) {
+      // Fallback to finding by MongoDB _id
+      product = await Product.findByIdAndDelete(req.params.id);
+    }
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }

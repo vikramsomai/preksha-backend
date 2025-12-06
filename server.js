@@ -18,6 +18,12 @@ import {
   EsewaInitiatePayment,
   codPayment
 } from "./controllers/esewa.controller.js";
+import reviewRoutes from "./routes/reviewRoutes.js";
+import couponRoutes from "./routes/couponRoutes.js";
+import shippingRoutes from "./routes/shippingRoutes.js";
+import contactRoutes from "./routes/contactRoutes.js";
+import wishlistRoutes from "./routes/wishlistRoutes.js";
+import flashSaleRoutes from "./routes/flashSaleRoutes.js";
 
 dotenv.config();
 const app = express();
@@ -93,6 +99,12 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/order", orderRoutes);
 app.use("/category", categoryRoute);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/coupons", couponRoutes);
+app.use("/api/shipping", shippingRoutes);
+app.use("/api/contact", contactRoutes);
+app.use("/api/wishlist", wishlistRoutes);
+app.use("/api/flash-sales", flashSaleRoutes);
 //routes
 app.post("/initiate-payment", EsewaInitiatePayment);
 app.post("/payment-status", paymentStatus);
